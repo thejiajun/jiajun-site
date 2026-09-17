@@ -1,0 +1,7 @@
+name = "jiajun-site"
+main = "index.js"
+compatibility_date = "2026-09-16"
+
+[[routes]]
+pattern = "jiajun.site"
+custom_domain = true
