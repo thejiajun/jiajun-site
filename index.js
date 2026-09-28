@@ -82,8 +82,10 @@ const SITES = [
     zh: ['Linq', '链接与自动化'], en: ['Linq', 'Links and automation'] },
 ];
 
-const STATUS_CACHE_KEY = 'https://jiajun.site/__status-v1';
-const STATUS_TTL_SECONDS = 60;
+const STATUS_CACHE_KEY = 'https://jiajun.site/__status-v2';
+const STATUS_TTL_SECONDS = 60; // refresh in the background once the map is older than this
+const STATUS_KEEP_SECONDS = 7 * 24 * 3600; // keep the stale map around so the page never blocks
+const COLD_WAIT_MS = 1500; // with no cached map at all, wait at most this long before rendering "checking"
 const CHECK_TIMEOUT_MS = 3000;
 
 const esc = (value) => String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -114,16 +116,34 @@ async function checkAll() {
   return { checkedAt: Date.now(), sites: map };
 }
 
-async function getStatus(ctx) {
-  const cache = caches.default;
-  const cached = await cache.match(STATUS_CACHE_KEY);
-  if (cached) return cached.json();
+// Per-isolate guard: skip a background refresh if this isolate started one in the last 15s.
+// (Promises are not shared across requests — Workers disallow cross-request I/O.)
+let lastRefreshStartedAt = 0;
+
+async function refreshStatus() {
+  lastRefreshStartedAt = Date.now();
   const status = await checkAll();
   const res = new Response(JSON.stringify(status), {
-    headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${STATUS_TTL_SECONDS}` },
+    headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${STATUS_KEEP_SECONDS}` },
   });
-  ctx.waitUntil(cache.put(STATUS_CACHE_KEY, res));
+  await caches.default.put(STATUS_CACHE_KEY, res);
   return status;
+}
+
+// Stale-while-revalidate: always answer from the cached map; refresh it in the background when old.
+// Returns null only on a cold cache when checks take longer than COLD_WAIT_MS.
+async function getStatus(ctx) {
+  const cached = await caches.default.match(STATUS_CACHE_KEY);
+  if (cached) {
+    const status = await cached.json();
+    const stale = Date.now() - status.checkedAt > STATUS_TTL_SECONDS * 1000;
+    if (stale && Date.now() - lastRefreshStartedAt > 15000) ctx.waitUntil(refreshStatus().catch(() => {}));
+    return status;
+  }
+  const pending = refreshStatus().catch(() => null);
+  ctx.waitUntil(pending);
+  const timeout = new Promise((resolve) => setTimeout(() => resolve(null), COLD_WAIT_MS));
+  return Promise.race([pending, timeout]);
 }
 
 // Renders both languages; CSS hides the inactive one so switching needs no re-render.
@@ -131,11 +151,12 @@ const t = (zh, en) => `<span lang="zh-CN" data-l="zh">${esc(zh)}</span><span lan
 const icon = (name, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
 
 function card(site, st) {
-  const state = site.comingSoon ? 'soon' : st?.online ? 'online' : 'offline';
+  const state = site.comingSoon ? 'soon' : !st ? 'checking' : st.online ? 'online' : 'offline';
   const stateLabel = {
     online: t('在线', 'Online'),
     offline: t('离线', 'Offline'),
     soon: t('即将上线', 'Coming soon'),
+    checking: t('检查中…', 'Checking…'),
   }[state];
   const lock = st?.auth ? `<span class="auth" title="需要登录 / Sign-in required">${icon('lock', 'lk')}${t('需登录', 'Sign-in')}</span>` : '';
   const inner = `
@@ -151,16 +172,23 @@ function card(site, st) {
 
 function section(group, items, status) {
   if (!items.length) return '';
-  return `<section class="group${group.id === 'offline' ? ' offline' : ''}"><h2>${t(group.zh, group.en)}<span class="count">${items.length}</span></h2><div class="grid">${items.map((s) => card(s, status.sites[s.host])).join('')}</div></section>`;
+  return `<section class="group${group.id === 'offline' ? ' offline' : ''}"><h2>${t(group.zh, group.en)}<span class="count">${items.length}</span></h2><div class="grid">${items.map((s) => card(s, status?.sites[s.host])).join('')}</div></section>`;
 }
 
 function renderPage(status) {
-  const isOffline = (s) => !s.comingSoon && !status.sites[s.host]?.online;
-  const online = SITES.filter((s) => !s.comingSoon && status.sites[s.host]?.online).length;
+  const known = Boolean(status);
+  const isOffline = (s) => known && !s.comingSoon && !status.sites[s.host]?.online;
+  const online = known ? SITES.filter((s) => !s.comingSoon && status.sites[s.host]?.online).length : 0;
   const offline = SITES.filter(isOffline).length;
   const sections = GROUPS.map((g) => section(g, SITES.filter((s) => s.group === g.id && !isOffline(s)), status)).join('')
     + section(OFFLINE_GROUP, SITES.filter(isOffline), status);
-  const time = new Date(status.checkedAt).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' });
+  const time = known ? new Date(status.checkedAt).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' }) : '';
+  const summary = known
+    ? `<span class="dot" style="background:var(--online)"></span>${t(`${online} 个在线 · ${offline} 个离线`, `${online} online · ${offline} offline`)}`
+    : `<span class="dot"></span>${t('正在检查各站点状态…', 'Checking site status…')}`;
+  const footer = known
+    ? t(`状态每分钟刷新 · 上次检查 ${time} PT`, `Status refreshes every minute · last checked ${time} PT`)
+    : t('状态检查中，刷新页面即可看到结果', 'Checking status — reload in a moment to see results');
 
   return `<!doctype html>
 <html lang="zh-CN" data-lang="zh">
@@ -248,7 +276,7 @@ footer{margin-top:48px;color:var(--text-2);font-size:12px}
 <header>
   <div>
     <h1>${t('jiajun 的站点', "jiajun's sites")}</h1>
-    <p class="sub"><span class="dot" style="background:var(--online)"></span>${t(`${online} 个在线 · ${offline} 个离线`, `${online} online · ${offline} offline`)}</p>
+    <p class="sub">${summary}</p>
   </div>
   <div class="seg" role="group" aria-label="Language">
     <button type="button" data-set="zh" aria-pressed="true">中文</button>
@@ -256,7 +284,7 @@ footer{margin-top:48px;color:var(--text-2);font-size:12px}
   </div>
 </header>
 ${sections}
-<footer>${t(`状态每分钟刷新 · 上次检查 ${time} PT`, `Status refreshes every minute · last checked ${time} PT`)}</footer>
+<footer>${footer}</footer>
 </main>
 <script>
 (function(){
