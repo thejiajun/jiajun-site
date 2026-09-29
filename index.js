@@ -56,7 +56,7 @@ const SITES = [
     zh: ['SSH 终端', '浏览器里的远程终端'], en: ['SSH Terminal', 'Remote terminal in the browser'] },
   { host: 'tower.jiajun.site', group: 'dev', icon: 'radar',
     zh: ['塔台', '查看各台机器的推理服务、节点状态与任务'], en: ['Tower', 'Inference nodes, machine status and jobs'] },
-  { host: 'jc-design.jiajun.site', group: 'dev', icon: 'palette', comingSoon: true,
+  { host: 'jc-design.jiajun.site', group: 'dev', icon: 'palette',
     zh: ['jc-design 设计系统', '个人设计系统：颜色、字体与组件'], en: ['jc-design', 'Personal design system: color, type, components'] },
   { host: 'research.jiajun.site', group: 'dev', icon: 'flask',
     zh: ['研究工作台', '调研与资料整理'], en: ['Research', 'Research workbench'] },
