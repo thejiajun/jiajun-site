@@ -1,5 +1,7 @@
-# jiajun.site
+# jiajun.site (moved)
 
-Personal landing page for the `jiajun.site` service directory.
+This repo is archived. The jiajun.site directory now lives in the personal-info-hub
+monorepo as `apps/site` (same Worker `jiajun-site`, same domain) and is deployed by its CI.
 
-Deploy with `npx wrangler deploy` using the personal Cloudflare account.
+- Code: thejiajun/personal-info-hub → apps/site
+- Icon redesign: branch `update-service-icons` in that repo
