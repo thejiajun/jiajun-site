@@ -173,22 +173,116 @@ function card(site, st) {
   return `<a class="card is-${state}" href="https://${esc(site.host)}/">${inner}</a>`;
 }
 
-function section(group, items, status) {
+function section(group, items, status, index) {
   if (!items.length) return '';
-  return `<section class="group${group.id === 'offline' ? ' offline' : ''}"><h2>${t(group.zh, group.en)}<span class="count">${items.length}</span></h2><div class="grid">${items.map((s) => card(s, status?.sites[s.host])).join('')}</div></section>`;
+  const idx = String(index).padStart(2, '0');
+  return `<section class="group${group.id === 'offline' ? ' offline' : ''}"><h2><span class="idx">§ ${idx}</span><span class="title">${t(group.zh, group.en)}</span><span class="count">${items.length}</span></h2><div class="grid">${items.map((s) => card(s, status?.sites[s.host])).join('')}</div></section>`;
 }
+
+// Deterministic 12×12 pixel face (ported from jiajun's jc-design pixel-art/pixel-face.ts).
+// Tones: 0 empty, 1 lightest … 4 darkest; mirror-symmetric like handheld sprites.
+function hashSeed(seed) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i += 1) { hash ^= seed.charCodeAt(i); hash = Math.imul(hash, 0x01000193); }
+  return hash >>> 0;
+}
+function mulberry32(seed) {
+  let state = seed;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let v = Math.imul(state ^ (state >>> 15), 1 | state);
+    v = (v + Math.imul(v ^ (v >>> 7), 61 | v)) ^ v;
+    return ((v ^ (v >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const HEADS = [
+  { top: 2, rows: [3, 4, 5, 5, 5, 5, 5, 4, 3] },
+  { top: 2, rows: [4, 5, 5, 5, 5, 5, 5, 5, 4] },
+  { top: 1, rows: [3, 4, 4, 4, 4, 4, 4, 4, 4, 3] },
+  { top: 3, rows: [4, 5, 5, 5, 5, 5, 4, 3] },
+];
+const HAIR = ['none', 'cap', 'fringe', 'spiky', 'long'];
+const EXPRESSIONS = ['smile', 'neutral', 'surprised', 'sleepy', 'grin'];
+function pixelFace(seed, options = {}) {
+  const next = mulberry32(hashSeed(seed));
+  const pick = (list) => list[Math.floor(next() * list.length)];
+  const size = 12;
+  const grid = Array.from({ length: size }, () => Array(size).fill(options.framed ? 2 : 0));
+  const set = (row, col, tone) => {
+    if (row < 0 || row >= size || col < 0 || col >= size / 2) return;
+    grid[row][col] = tone; grid[row][size - 1 - col] = tone;
+  };
+  const head = pick(HEADS);
+  const hair = pick(HAIR);
+  const expression = options.expression ?? pick(EXPRESSIONS);
+  const eyeCol = next() < 0.5 ? 3 : 4;
+  const cheeks = next() < 0.45;
+  const bottom = head.top + head.rows.length - 1;
+  const inHead = (row, col) => { const half = head.rows[row - head.top]; return half !== undefined && col >= size / 2 - half && col < size / 2; };
+  for (let r = 0; r < size; r += 1) for (let c = 0; c < size / 2; c += 1) if (inHead(r, c)) set(r, c, 1);
+  for (let r = 0; r < size; r += 1) for (let c = 0; c < size / 2; c += 1) {
+    if (inHead(r, c)) continue;
+    if (inHead(r - 1, c) || inHead(r + 1, c) || inHead(r, c - 1) || (c === size / 2 - 1 ? false : inHead(r, c + 1))) set(r, c, 4);
+  }
+  const hairTone = next() < 0.5 ? 3 : 4;
+  const top = head.top;
+  if (hair === 'cap' || hair === 'fringe' || hair === 'long') {
+    for (let c = 0; c < size / 2; c += 1) { if (inHead(top, c)) set(top, c, hairTone); if (inHead(top + 1, c)) set(top + 1, c, hairTone); }
+  }
+  if (hair === 'fringe') for (let c = 0; c < size / 2; c += 1) if (inHead(top + 2, c) && (c + (eyeCol === 3 ? 0 : 1)) % 2 === 0) set(top + 2, c, hairTone);
+  if (hair === 'long') for (let r = top + 2; r <= Math.min(bottom + 1, size - 1); r += 1) { const half = head.rows[Math.min(r - top, head.rows.length - 1)]; set(r, size / 2 - half - 1, hairTone); }
+  if (hair === 'spiky') for (let c = 1; c < size / 2; c += 2) if (inHead(top, c)) set(top - 1, c, 4);
+  const eyeRow = top + 4;
+  const mouthRow = Math.min(top + 6, bottom - 1);
+  if (expression === 'sleepy') { set(eyeRow, eyeCol, 4); set(eyeRow, eyeCol - 1, 4); }
+  else if (expression === 'surprised') { set(eyeRow - 1, eyeCol, 4); set(eyeRow, eyeCol, 4); }
+  else set(eyeRow, eyeCol, 4);
+  if (cheeks && expression !== 'sleepy') set(eyeRow + 1, eyeCol - 1, 2);
+  switch (expression) {
+    case 'smile': set(mouthRow - 1, 4, 4); set(mouthRow, 5, 4); break;
+    case 'grin': set(mouthRow, 4, 4); set(mouthRow, 5, 4); set(mouthRow + 1, 5, 3); break;
+    case 'surprised': set(mouthRow, 5, 4); set(mouthRow + 1, 5, 4); break;
+    case 'sleepy': set(mouthRow, 5, 3); break;
+    default: set(mouthRow, 4, 4); set(mouthRow, 5, 4);
+  }
+  return grid;
+}
+// Horizontal runs of one tone, so a row is a few rects instead of twelve.
+function pixelSvg(grid, fill, attrs = '') {
+  const rects = [];
+  grid.forEach((row, y) => {
+    let x = 0;
+    while (x < row.length) {
+      const tone = row[x]; let end = x + 1;
+      while (end < row.length && row[end] === tone) end += 1;
+      if (tone) rects.push(`<rect x="${x}" y="${y}" width="${end - x}" height="1" fill="${fill(tone)}"/>`);
+      x = end;
+    }
+  });
+  return `<svg ${attrs} viewBox="0 0 12 12" shape-rendering="crispEdges">${rects.join('')}</svg>`;
+}
+const FACE = pixelFace('jiajun', { expression: 'smile' });
+const FACE_SVG = pixelSvg(FACE, (tone) => `var(--pixel-${tone})`, 'class="face" aria-hidden="true"');
+// Favicon pins the Newsprint light values (a data: URI cannot read CSS variables).
+const FAVICON = pixelSvg(FACE, (tone) => ({ 1: '#ece9da', 2: '#b0ad9d', 3: '#717064', 4: '#2b2b24' }[tone]), 'xmlns="http://www.w3.org/2000/svg"')
+  .replace('<rect', '<rect width="12" height="12" fill="#e4e0cc"/><rect');
 
 function renderPage(status) {
   const known = Boolean(status);
   const isOffline = (s) => known && !s.comingSoon && !status.sites[s.host]?.online;
   const online = known ? SITES.filter((s) => !s.comingSoon && status.sites[s.host]?.online).length : 0;
   const offline = SITES.filter(isOffline).length;
-  const sections = GROUPS.map((g) => section(g, SITES.filter((s) => s.group === g.id && !isOffline(s)), status)).join('')
-    + section(OFFLINE_GROUP, SITES.filter(isOffline), status);
+  // Number only the sections that render, so an all-offline group leaves no gap.
+  const sections = [...GROUPS.map((g) => [g, SITES.filter((s) => s.group === g.id && !isOffline(s))]), [OFFLINE_GROUP, SITES.filter(isOffline)]]
+    .filter(([, items]) => items.length)
+    .map(([g, items], i) => section(g, items, status, i + 1)).join('');
   const time = known ? new Date(status.checkedAt).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' }) : '';
   const summary = known
-    ? `<span class="dot" style="background:var(--online)"></span>${t(`${online} 个在线 · ${offline} 个离线`, `${online} online · ${offline} offline`)}`
+    ? `<span class="dot on"></span>${t(`${online} 个在线 · ${offline} 个离线`, `${online} online · ${offline} offline`)}`
     : `<span class="dot"></span>${t('正在检查各站点状态…', 'Checking site status…')}`;
+  const counter = known
+    ? `<div class="counter" aria-hidden="true"><span class="num">${String(online).padStart(2, '0')}</span><span class="label"><span class="led"></span>${t('个站点在线', 'sites online')}</span></div>`
+    : '';
   const footer = known
     ? t(`状态每分钟刷新 · 上次检查 ${time} PT`, `Status refreshes every minute · last checked ${time} PT`)
     : t('状态检查中，刷新页面即可看到结果', 'Checking status — reload in a moment to see results');
@@ -201,100 +295,165 @@ function renderPage(status) {
 <meta name="color-scheme" content="light dark">
 <title>jiajun 的站点</title>
 <meta name="description" content="jiajun.site 上所有服务的入口与实时状态">
-<link rel="icon" href="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#0071e3"/><text x="16" y="22" font-family="-apple-system,Helvetica,sans-serif" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">j</text></svg>')}">
-<script>try{var l=localStorage.getItem('lang');if(l==='en'){document.documentElement.dataset.lang='en';document.documentElement.lang='en';}}catch(e){}</script>
+<link rel="icon" href="data:image/svg+xml,${encodeURIComponent(FAVICON)}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght,ROND@800,100&family=Instrument+Serif&family=JetBrains+Mono:wght@400..600&display=swap">
+<script>try{var d=document.documentElement,l=localStorage.getItem('lang'),p=localStorage.getItem('palette');if(l==='en'){d.dataset.lang='en';d.lang='en';}if(p==='ultramarine')d.dataset.palette='ultramarine';}catch(e){}</script>
 <style>
+/* Retro-future themes, base colours copied from jc-design themes.css (--rt-*).
+   Newsprint is the default; Ultramarine is opt-in via data-palette.
+   Light/dark follow the system; data-theme="light|dark" on <html> forces one. */
 :root{
-  --bg:#f5f5f7;--card:#ffffff;--text:#1d1d1f;--text-2:#6e6e73;--border:rgba(29,29,31,.08);--brand:#0071e3;
-  --online:#30b158;--offline:#aeaeb2;--seg:rgba(29,29,31,.06);--seg-on:#ffffff;
-  --shadow:0 1px 2px rgba(29,29,31,.04),0 4px 12px -2px rgba(29,29,31,.08);
-  --shadow-hover:0 2px 4px rgba(29,29,31,.05),0 12px 28px -6px rgba(29,29,31,.16);
-  --radius:18px;
+  --rt-paper:#e4e0cc;--rt-paper-raised:#ece9da;--rt-paper-sunken:#d8d3bc;
+  --rt-ink:#2b2b24;--rt-ink-2:#5a5c4f;--rt-signal:#d71920;--rt-signal-ink:#b3141b;--rt-success-ink:#3f6b2a;
+  --grain-opacity:.1;--grain-invert:0;
   color-scheme:light;
 }
-@media (prefers-color-scheme:dark){:root{
-  --bg:#000000;--card:#1c1c1e;--text:#f5f5f7;--text-2:#a1a1a6;--border:rgba(255,255,255,.08);--brand:#2997ff;
-  --online:#32d74b;--offline:#636366;--seg:rgba(255,255,255,.08);--seg-on:#3a3a3c;
-  --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 12px -2px rgba(0,0,0,.5);
-  --shadow-hover:0 2px 4px rgba(0,0,0,.4),0 12px 28px -6px rgba(0,0,0,.7);
-  color-scheme:dark;
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --rt-paper:#121210;--rt-paper-raised:#1b1b18;--rt-paper-sunken:#24241f;
+  --rt-ink:#e4e0cc;--rt-ink-2:#9a9886;--rt-signal:#f0463c;--rt-signal-ink:#ff6b5e;--rt-success-ink:#8dbf6a;
+  --grain-opacity:.08;--grain-invert:1;color-scheme:dark;
 }}
+:root[data-theme="dark"]{
+  --rt-paper:#121210;--rt-paper-raised:#1b1b18;--rt-paper-sunken:#24241f;
+  --rt-ink:#e4e0cc;--rt-ink-2:#9a9886;--rt-signal:#f0463c;--rt-signal-ink:#ff6b5e;--rt-success-ink:#8dbf6a;
+  --grain-opacity:.08;--grain-invert:1;color-scheme:dark;
+}
+:root[data-palette="ultramarine"]{
+  --rt-paper:#e4e4e6;--rt-paper-raised:#efeff1;--rt-paper-sunken:#d6d6db;
+  --rt-ink:#1f10d8;--rt-ink-2:#5a52c8;--rt-signal:#e5322b;--rt-signal-ink:#c21f1a;--rt-success-ink:#2f6b3a;
+}
+@media (prefers-color-scheme:dark){:root[data-palette="ultramarine"]:not([data-theme="light"]){
+  --rt-paper:#0c0a1f;--rt-paper-raised:#15122e;--rt-paper-sunken:#1e1a3d;
+  --rt-ink:#c9c4ff;--rt-ink-2:#8e88d0;--rt-signal:#ff5a4e;--rt-signal-ink:#ff7a70;--rt-success-ink:#8dbf8a;
+}}
+:root[data-palette="ultramarine"][data-theme="dark"]{
+  --rt-paper:#0c0a1f;--rt-paper-raised:#15122e;--rt-paper-sunken:#1e1a3d;
+  --rt-ink:#c9c4ff;--rt-ink-2:#8e88d0;--rt-signal:#ff5a4e;--rt-signal-ink:#ff7a70;--rt-success-ink:#8dbf8a;
+}
+/* Derived tokens, same formulas as jc-design themes.css. */
+:root{
+  --hairline:color-mix(in srgb,var(--rt-ink) 16%,transparent);
+  --border-strong:color-mix(in srgb,var(--rt-ink) 28%,transparent);
+  --control-hover:color-mix(in srgb,var(--rt-ink) 6%,transparent);
+  --dot-grid:color-mix(in srgb,var(--rt-ink) 16%,transparent);
+  --pixel-1:var(--rt-paper-raised);
+  --pixel-2:color-mix(in srgb,var(--rt-ink) 28%,var(--rt-paper));
+  --pixel-3:color-mix(in srgb,var(--rt-ink) 62%,var(--rt-paper));
+  --pixel-4:var(--rt-ink);
+  --font-sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Inter","Noto Sans CJK SC","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  --font-display:"Instrument Serif","Songti SC","Noto Serif SC","Source Han Serif SC",ui-serif,Georgia,serif;
+  --font-mono:"JetBrains Mono",ui-monospace,"SF Mono","PingFang SC","Noto Sans SC",monospace;
+  --font-dot:"Doto","JetBrains Mono",ui-monospace,monospace;
+}
 *{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Inter","Noto Sans CJK SC","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.4}
+html{-webkit-text-size-adjust:100%;background:var(--rt-paper)}
+body{margin:0;background:var(--rt-paper);color:var(--rt-ink);font-family:var(--font-sans);-webkit-font-smoothing:antialiased;line-height:1.45}
 [data-lang="zh"] [data-l="en"],[data-lang="en"] [data-l="zh"]{display:none}
-main{max-width:1080px;margin:0 auto;padding:56px 24px 48px}
-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:40px}
-h1{font-size:clamp(34px,6vw,52px);line-height:1.05;letter-spacing:-.025em;font-weight:700;margin:0 0 10px}
-.sub{margin:0;color:var(--text-2);font-size:17px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.sub .dot{width:8px;height:8px}
-.seg{display:inline-flex;padding:2px;border-radius:9px;background:var(--seg);flex:none;margin-top:6px}
-.seg button{font:inherit;font-size:13px;font-weight:500;color:var(--text-2);background:none;border:0;border-radius:7px;padding:5px 12px;cursor:pointer;min-width:52px}
-.seg button[aria-pressed="true"]{background:var(--seg-on);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.12)}
-.seg button:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
-.group{margin-top:36px}
-h2{font-size:21px;font-weight:600;letter-spacing:-.01em;margin:0 0 14px;display:flex;align-items:baseline;gap:8px}
-h2 .count{font-size:15px;font-weight:400;color:var(--text-2)}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
-.card{display:flex;gap:16px;align-items:flex-start;padding:18px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);color:inherit;text-decoration:none;min-width:0;transition:transform .2s ease,box-shadow .2s ease}
-a.card:hover{transform:translateY(-2px);box-shadow:var(--shadow-hover)}
-a.card:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
-.app{flex:none;width:52px;height:52px;border-radius:22%;display:grid;place-items:center;color:#fff;box-shadow:inset 0 0 0 .5px rgba(255,255,255,.25),0 1px 2px rgba(0,0,0,.12)}
-.app .i{width:28px;height:28px}
-.g-daily{background:linear-gradient(160deg,#5ac8fa,#0071e3)}
-.g-dev{background:linear-gradient(160deg,#8e8cff,#5147d8)}
-.g-media{background:linear-gradient(160deg,#ffae45,#ff375f)}
-.g-other{background:linear-gradient(160deg,#63e6be,#1f9d8b)}
+.label,.eyebrow{font-family:var(--font-mono);font-size:11px;line-height:1.35;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--rt-ink-2)}
+.bar{border-bottom:1px solid var(--hairline)}
+.bar-in{max-width:1080px;margin:0 auto;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand{display:inline-flex;align-items:center;gap:10px;color:inherit;text-decoration:none;font-family:var(--font-mono);font-size:13px;font-weight:500;min-width:0}
+.face{width:28px;height:28px;flex:none;display:block}
+.ctrls{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.seg{display:inline-flex;border:1px solid var(--hairline);border-radius:3px;padding:2px;flex:none}
+.seg button{position:relative;font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--rt-ink-2);background:none;border:0;border-radius:2px;padding:5px 11px;cursor:pointer;min-width:44px;min-height:30px}
+.seg button:hover{background:var(--control-hover);color:var(--rt-ink)}
+.seg button[aria-pressed="true"]{background:var(--rt-ink);color:var(--rt-paper)}
+.seg button[aria-pressed="true"]::before{content:"";position:absolute;top:4px;left:4px;width:4px;height:4px;border-radius:50%;background:var(--rt-signal)}
+.seg button:focus-visible{outline:2px solid var(--rt-ink);outline-offset:1px}
+main{max-width:1080px;margin:0 auto;padding:0 24px 48px}
+.hero{position:relative;overflow:hidden;margin:0 -24px;padding:40px 24px 36px;background-image:radial-gradient(var(--dot-grid) 1px,transparent 1.2px);background-size:14px 14px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+.hero::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:var(--grain-opacity);filter:invert(var(--grain-invert));background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.4 -.35'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+.hero>*{position:relative;z-index:1;min-width:0}
+h1{font-family:var(--font-display);font-weight:400;font-synthesis-weight:none;font-size:clamp(48px,8vw,88px);line-height:.95;letter-spacing:-.01em;margin:10px 0 14px}
+.sub{margin:0;color:var(--rt-ink-2);font-family:var(--font-mono);font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.counter{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex:none}
+.counter .num{font-family:var(--font-dot);font-weight:800;font-size:64px;line-height:.8;font-variant-numeric:tabular-nums}
+.counter .label{display:inline-flex;align-items:center;gap:6px}
+.led{width:6px;height:6px;border-radius:50%;background:var(--rt-signal);flex:none}
+.group{margin-top:40px}
+h2{display:flex;align-items:baseline;gap:12px;margin:0 0 14px;padding-top:12px;border-top:1px solid var(--hairline);font-weight:400}
+h2 .idx,h2 .count{font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;color:var(--rt-ink-2)}
+h2 .title{font-family:var(--font-display);font-size:30px;line-height:1.1;letter-spacing:-.01em}
+h2 .count{margin-left:auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.card{display:flex;gap:14px;align-items:flex-start;padding:16px;background:var(--rt-paper-raised);border:1px solid var(--hairline);border-radius:4px;color:inherit;text-decoration:none;min-width:0;transition:border-color .15s ease,background-color .15s ease}
+a.card:hover{border-color:var(--border-strong);background:color-mix(in srgb,var(--rt-ink) 4%,var(--rt-paper-raised))}
+a.card:focus-visible{outline:2px solid var(--rt-ink);outline-offset:2px}
+.app{flex:none;width:44px;height:44px;border-radius:3px;display:grid;place-items:center;color:var(--rt-ink);background:var(--rt-paper-sunken);border:1px solid var(--hairline)}
+.app .i{width:22px;height:22px;stroke-width:1.6}
 .body{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
-.name{font-size:17px;font-weight:600;letter-spacing:-.01em}
-.desc{font-size:14px;color:var(--text-2)}
-.meta{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;margin-top:8px;font-size:12px;color:var(--text-2)}
-.state,.auth{display:inline-flex;align-items:center;gap:5px;font-weight:500}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--offline);flex:none}
-.s-online .dot{background:var(--online);box-shadow:0 0 0 3px color-mix(in srgb,var(--online) 18%,transparent)}
-.s-soon{color:var(--brand)}
-.s-soon .dot{background:var(--brand)}
-.lk{width:12px;height:12px}
-.host{margin-left:auto;font-variant-numeric:tabular-nums;opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
-.offline .card{box-shadow:none;background:transparent}
-.offline .app,.is-soon .app{filter:grayscale(1);opacity:.45}
-.offline .name,.offline .desc{opacity:.6}
-.is-soon{border-style:dashed;box-shadow:none;cursor:default}
-footer{margin-top:48px;color:var(--text-2);font-size:12px}
+.name{font-size:16px;font-weight:600;letter-spacing:-.005em}
+.desc{font-size:14px;color:var(--rt-ink-2)}
+.meta{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;margin-top:10px;font-family:var(--font-mono);font-size:11px;color:var(--rt-ink-2)}
+.state,.auth{display:inline-flex;align-items:center;gap:6px;font-weight:500}
+.dot{width:7px;height:7px;border-radius:50%;border:1px solid var(--rt-ink-2);flex:none;background:transparent}
+.dot.on,.s-online .dot{background:var(--rt-success-ink);border-color:var(--rt-success-ink)}
+.s-online{color:var(--rt-success-ink)}
+.s-soon{color:var(--rt-signal-ink)}
+.s-soon .dot{background:var(--rt-signal);border-color:var(--rt-signal)}
+.lk{width:11px;height:11px}
+.host{margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.offline .card{background:transparent;border-style:dashed}
+.offline .app,.is-soon .app{color:var(--rt-ink-2);background:transparent}
+.offline .name,.offline .desc{opacity:.65}
+.is-soon{border-style:dashed;cursor:default}
+footer{margin-top:48px;padding-top:12px;border-top:1px solid var(--hairline)}
 @media (max-width:600px){
-  main{padding:32px 16px 40px}
-  header{margin-bottom:28px}
-  .sub{font-size:15px}
-  .grid{grid-template-columns:1fr;gap:10px}
-  .card{padding:14px;gap:14px}
-  .app{width:46px;height:46px}
-  .app .i{width:24px;height:24px}
+  .bar-in{padding:10px 16px}
+  .brand span{display:none}
+  main{padding:0 16px 40px}
+  .hero{margin:0 -16px;padding:28px 16px 24px}
+  .counter{display:none}
+  .group{margin-top:32px}
+  h2 .title{font-size:26px}
+  .grid{grid-template-columns:1fr;gap:8px}
+  .card{padding:14px;gap:12px}
+  .app{width:40px;height:40px}
+  .app .i{width:20px;height:20px}
   .host{margin-left:0}
 }
-@media (prefers-reduced-motion:reduce){.card{transition:none}a.card:hover{transform:none}}
+@media (prefers-reduced-motion:reduce){.card{transition:none}}
 </style>
 </head>
 <body>
+<header class="bar"><div class="bar-in">
+  <a class="brand" href="/">${FACE_SVG}<span>jiajun.site</span></a>
+  <div class="ctrls">
+    <div class="seg" role="group" aria-label="Language">
+      <button type="button" data-lang-set="zh" aria-pressed="true">中文</button>
+      <button type="button" data-lang-set="en" aria-pressed="false">EN</button>
+    </div>
+    <div class="seg" role="group" aria-label="Theme">
+      <button type="button" data-palette-set="newsprint" aria-pressed="true">${t('新闻纸', 'Newsprint')}</button>
+      <button type="button" data-palette-set="ultramarine" aria-pressed="false">${t('群青', 'Ultramarine')}</button>
+    </div>
+  </div>
+</div></header>
 <main>
-<header>
+<section class="hero">
   <div>
+    <p class="eyebrow">${t('服务目录 · 实时状态', 'Service directory · live status')}</p>
     <h1>${t('jiajun 的站点', "jiajun's sites")}</h1>
     <p class="sub">${summary}</p>
   </div>
-  <div class="seg" role="group" aria-label="Language">
-    <button type="button" data-set="zh" aria-pressed="true">中文</button>
-    <button type="button" data-set="en" aria-pressed="false">EN</button>
-  </div>
-</header>
+  ${counter}
+</section>
 ${sections}
-<footer>${footer}</footer>
+<footer class="label">${footer}</footer>
 </main>
 <script>
 (function(){
-  var root=document.documentElement,btns=document.querySelectorAll('.seg button');
-  function apply(l){root.dataset.lang=l;root.lang=l==='en'?'en':'zh-CN';document.title=l==='en'?"jiajun's sites":'jiajun 的站点';btns.forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.set===l))});}
-  apply(root.dataset.lang||'zh');
-  btns.forEach(function(b){b.addEventListener('click',function(){apply(b.dataset.set);try{localStorage.setItem('lang',b.dataset.set)}catch(e){}})});
+  var root=document.documentElement;
+  var langBtns=document.querySelectorAll('[data-lang-set]'),palBtns=document.querySelectorAll('[data-palette-set]');
+  function press(btns,key,v){btns.forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset[key]===v))});}
+  function lang(l){root.dataset.lang=l;root.lang=l==='en'?'en':'zh-CN';document.title=l==='en'?"jiajun's sites":'jiajun 的站点';press(langBtns,'langSet',l);}
+  function palette(p){if(p==='ultramarine')root.dataset.palette=p;else delete root.dataset.palette;press(palBtns,'paletteSet',p);}
+  lang(root.dataset.lang||'zh');palette(root.dataset.palette||'newsprint');
+  langBtns.forEach(function(b){b.addEventListener('click',function(){lang(b.dataset.langSet);try{localStorage.setItem('lang',b.dataset.langSet)}catch(e){}})});
+  palBtns.forEach(function(b){b.addEventListener('click',function(){palette(b.dataset.paletteSet);try{localStorage.setItem('palette',b.dataset.paletteSet)}catch(e){}})});
 })();
 </script>
 </body>
