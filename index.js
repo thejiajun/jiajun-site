@@ -4,6 +4,7 @@
 // Lucide icons (ISC license, https://lucide.dev) — inner SVG markup, 24px grid.
 const ICONS = {
   library: '<rect width="8" height="18" x="3" y="3" rx="1"/><path d="M7 3v18"/><path d="M20.4 18.9c.2.5-.1 1.1-.6 1.3l-1.9.7c-.5.2-1.1-.1-1.3-.6L11.1 5.1c-.2-.5.1-1.1.6-1.3l1.9-.7c.5-.2 1.1.1 1.3.6Z"/>',
+  pot: '<path d="M2 12h20"/><path d="M20 12v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8"/><path d="m4 8 16-4"/><path d="m8.86 6.78-.45-1.81a2 2 0 0 1 1.45-2.43l1.94-.48a2 2 0 0 1 2.43 1.46l.45 1.8"/>',
   languages: '<path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/>',
   train: '<path d="M8 3.1V7a4 4 0 0 0 8 0V3.1"/><path d="m9 15-1-1"/><path d="m15 15 1-1"/><path d="M9 19c-2.8 0-5-2.2-5-5v-4a8 8 0 0 1 16 0v4c0 2.8-2.2 5-5 5Z"/><path d="m8 19-2 3"/><path d="m16 19 2 3"/>',
   scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/>',
@@ -41,6 +42,8 @@ const SITES = [
     zh: ['信息库', '个人信息汇总与资料库'], en: ['Info Hub', 'Personal info hub and reference library'] },
   { host: 'english.jiajun.site', group: 'daily', icon: 'languages',
     zh: ['英语练习', '英语表达练习'], en: ['English Practice', 'English expression practice'] },
+  { host: 'recipes.jiajun.site', group: 'daily', icon: 'pot',
+    zh: ['菜谱', '收藏里的菜谱、本周菜单、采购清单和做饭模式'], en: ['Recipes', 'Saved recipes, weekly menu, grocery list and cook mode'] },
   { host: 'caltrain.jiajun.site', group: 'daily', icon: 'train',
     zh: ['Caltrain 通勤', '实时查看 Caltrain 通勤班次状态'], en: ['Caltrain Commute', 'Live Caltrain commute status'] },
   { host: 'screenshot.jiajun.site', group: 'daily', icon: 'scan',
